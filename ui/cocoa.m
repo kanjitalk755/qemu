@@ -22,6 +22,8 @@
  * THE SOFTWARE.
  */
 
+#define GAMEPAD		1
+
 #include "qemu/osdep.h"
 
 #import <Cocoa/Cocoa.h>
@@ -38,6 +40,9 @@
 #include "qemu-version.h"
 #include <Carbon/Carbon.h>
 #include "qom/cpu.h"
+#if GAMEPAD
+#include "gamepad-osx/gamepad.h"
+#endif
 
 #ifndef MAC_OS_X_VERSION_10_5
 #define MAC_OS_X_VERSION_10_5 1050
@@ -334,6 +339,9 @@ static void handleAnyDeviceErrors(Error * err)
     BOOL isFullscreen;
     BOOL isAbsoluteEnabled;
     BOOL isMouseDeassociated;
+#if GAMEPAD
+	void *gamepad_ctx;
+#endif
 }
 - (void) switchSurface:(pixman_image_t *)image;
 - (void) grabMouse;
@@ -366,6 +374,25 @@ static void handleAnyDeviceErrors(Error * err)
 
 QemuCocoaView *cocoaView;
 
+#if GAMEPAD
+static pthread_mutex_t gamepad_mutex;
+static int gamepad_deltaX, gamepad_deltaY;
+static void gamepad_callback(int type, int page, int usage, int value) {
+	if (type == 1 && page == 1) {
+		if (usage == 48) {
+			pthread_mutex_lock(&gamepad_mutex);
+			gamepad_deltaX += value;
+			pthread_mutex_unlock(&gamepad_mutex);
+		}
+		if (usage == 49) {
+			pthread_mutex_lock(&gamepad_mutex);
+			gamepad_deltaY += value;
+			pthread_mutex_unlock(&gamepad_mutex);
+		}
+	}
+}
+#endif
+
 @implementation QemuCocoaView
 - (id)initWithFrame:(NSRect)frameRect
 {
@@ -379,6 +406,11 @@ QemuCocoaView *cocoaView;
         screen.width = frameRect.size.width;
         screen.height = frameRect.size.height;
 
+#if GAMEPAD
+		gamepad_ctx = gamepad_init(0, 0, 1);
+		if (gamepad_ctx) gamepad_set_callback(gamepad_ctx, gamepad_callback);
+		pthread_mutex_init(&gamepad_mutex, NULL);
+#endif
     }
     return self;
 }
@@ -391,6 +423,10 @@ QemuCocoaView *cocoaView;
         CGDataProviderRelease(dataProviderRef);
         pixman_image_unref(pixman_image);
     }
+#if GAMEPAD
+	if (gamepad_ctx) gamepad_term(gamepad_ctx);
+	pthread_mutex_destroy(&gamepad_mutex);
+#endif
 
     [super dealloc];
 }
@@ -932,8 +968,16 @@ QemuCocoaView *cocoaView;
                     qemu_input_queue_abs(dcl->con, INPUT_AXIS_Y, screen.height - p.y, 0, screen.height);
                 }
             } else {
+#if GAMEPAD
+				pthread_mutex_lock(&gamepad_mutex);
+				qemu_input_queue_rel(dcl->con, INPUT_AXIS_X, gamepad_deltaX);
+				qemu_input_queue_rel(dcl->con, INPUT_AXIS_Y, gamepad_deltaY);
+				gamepad_deltaX = gamepad_deltaY = 0;
+				pthread_mutex_unlock(&gamepad_mutex);
+#else
                 qemu_input_queue_rel(dcl->con, INPUT_AXIS_X, (int)[event deltaX]);
                 qemu_input_queue_rel(dcl->con, INPUT_AXIS_Y, (int)[event deltaY]);
+#endif
             }
         } else {
             return false;
