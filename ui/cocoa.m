@@ -740,7 +740,7 @@ static void gamepad_callback(int type, int page, int usage, int value) {
     int keycode = 0;
     bool mouse_event = false;
     static bool switched_to_fullscreen = false;
-    NSPoint p = [event locationInWindow];
+	NSPoint p = [normalWindow mouseLocationOutsideOfEventStream];
 
     switch ([event type]) {
         case NSEventTypeFlagsChanged:
